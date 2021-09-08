@@ -1,0 +1,119 @@
+
+// VerilogA for an N bit Successive Approximation Register
+
+//Inputs
+//comp - Comparator output (V_sample - V_DAC)
+//start_conv - Begin conversion at the rising edge
+//clk - Clock
+
+//Outputs
+//d_out[`bits-1:0] - digital code
+//conv_finish - high when the conversion has completed
+
+
+`include "constants.vams"
+`include "disciplines.vams"
+`define bits 8 //change this to set the number of bits
+
+
+module sar_N_bit(comp, start_conv, clk, d_out, conv_finish);
+
+input comp, start_conv, clk;
+output conv_finish;
+output [`bits-1:0] d_out;
+
+electrical clk;
+electrical conv_finish, comp, start_conv;
+electrical [`bits-1:0] d_out;
+
+
+parameter real v_high = 1.0;
+parameter real v_low = 0.0;
+parameter real vth = 0.5;
+parameter real tdel = 30p;
+parameter real trise = 30p;
+parameter real tfall = 30p;
+
+
+integer state = 0 from [0:`bits+3];
+real data_out[`bits-1:0];
+real fin;
+real Res = 1m; //To avoid rigid branch shorts
+genvar j = 0; //Loop variable
+
+
+analog begin
+
+	@(initial_step("tran")) begin
+
+        for(j=0; j<`bits; j=j+1) begin
+            data_out[j] = v_low;
+        end
+
+        fin = v_low;
+        state = 0;
+
+    end 
+    
+    @(cross(V(start_conv)-vth, 1)) begin
+
+    
+        for(j=0; j<`bits; j=j+1) begin
+            data_out[j] = v_low;
+        end
+
+        fin = v_low;
+	    state = 1;
+    end
+    
+
+    @(cross(V(clk)-vth, 1)) begin
+		
+		if (state == 1) begin
+            data_out[`bits-1] = v_high;
+            state = 2;
+            fin = v_low;
+		end
+
+        else if ((state > 1) && (state < `bits+1)) begin
+            
+            if (V(comp) > vth)
+                data_out[`bits+1-state] = v_high;
+            else 
+                data_out[`bits+1-state] = v_low;
+            
+            	data_out[`bits-state] = v_high;
+             fin = (state == `bits+1) ? v_high : v_low;
+	        state = state + 1;
+		end
+
+
+        else if (state == `bits+1) begin
+		
+			if (V(comp) > vth)
+                data_out[`bits+1-state] = v_high;
+            else 
+                data_out[`bits+1-state] = v_low;
+
+             fin = (state == `bits+1) ? v_high : v_low;
+	        state = state + 1;
+	
+		end
+		
+		else begin
+            fin = v_high;
+            state = `bits+2;       
+		end
+       
+    end
+
+    for(j=0; j<`bits; j=j+1) begin
+        V(d_out[j]) <+ transition(data_out[j], tdel, trise, tfall);
+		V(d_out[j]) <+ I(d_out[j])*Res;
+    end
+    
+    V(conv_finish) <+ transition(fin, tdel, trise, tfall);
+
+end
+
+endmodule
